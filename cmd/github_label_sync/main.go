@@ -85,41 +85,85 @@ func newLabel(name, color string) *github.Label {
 	}
 }
 
+type localClient issues.Client
+
+func (l localClient) syncLabel(current map[string]string, name, color string) error {
+	colorBefore, found := current[name]
+
+	switch {
+	case !found:
+		fmt.Printf("Creating: label with color %s %s\n", color, name)
+		_, _, err := l.GithubClient.Issues.CreateLabel(
+			context.Background(), fGithubOwner, fGithubRepo, newLabel(name, color))
+		if err != nil {
+			fmt.Println("Create failed", err)
+			return err
+		}
+		// fmt.Println(resp)
+		// fmt.Println(labelAfter)
+	case found && color == colorBefore:
+		fmt.Printf("Verified: color up to date for %s\n", name)
+	case found && color != colorBefore:
+		fmt.Printf("Updating: color %s to %s for %s\n", colorBefore, color, name)
+		_, _, err := l.GithubClient.Issues.EditLabel(
+			context.Background(), fGithubOwner, fGithubRepo, name, newLabel(name, color))
+		if err != nil {
+			fmt.Println("Update failed", err)
+			return err
+		}
+		// fmt.Println(resp)
+		// fmt.Println(labelAfter)
+	}
+	return nil
+}
+
+func (l localClient) deleteLabel(name string) error {
+	fmt.Printf("Deleting: label %s\n", name)
+	_, err := l.GithubClient.Issues.DeleteLabel(
+		context.Background(), fGithubOwner, fGithubRepo, name)
+	if err != nil {
+		fmt.Println("")
+		return err
+	}
+	return nil
+}
+
 func main() {
 	flag.Parse()
 	if fAuthtoken == "" || fGithubOwner == "" || fGithubRepo == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
-	client := issues.NewClient(fGithubOwner, fGithubRepo, fAuthtoken)
-	foundLabels, resp, err := client.GithubClient.Issues.ListLabels(context.Background(), fGithubOwner, fGithubRepo, nil)
+	client := (*localClient)(issues.NewClient(fGithubOwner, fGithubRepo, fAuthtoken))
+	foundLabels, resp, err := client.GithubClient.Issues.ListLabels(
+		context.Background(), fGithubOwner, fGithubRepo, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
-	knownLabels := map[string]string{}
+
+	knownLabels := make(map[string]string, len(foundLabels))
 	fmt.Println(resp)
-	for i, l := range foundLabels {
+	for _, l := range foundLabels {
 		knownLabels[l.GetName()] = l.GetColor()
-		fmt.Println(i, l.GetColor(), l.GetName())
 	}
 
 	for name, color := range labelColors {
-		if _, ok := knownLabels[name]; ok {
-			fmt.Println("Found:", name)
-			// TODO: update colors if needed.
-			continue
-		}
-
-		// Create label.
-		label := newLabel(name, color)
-		fmt.Println("Creating:", label)
-
-		l, resp, err := client.GithubClient.Issues.CreateLabel(context.Background(), fGithubOwner, fGithubRepo, label)
+		err := client.syncLabel(knownLabels, name, color)
 		if err != nil {
-			log.Fatal("Fatal:" + err.Error())
+			log.Fatal(err)
+			break
 		}
-		fmt.Println(l)
-		fmt.Println(resp)
 	}
 	// TODO: delete extra known labels missing from LabelColors.
+	for name := range knownLabels {
+		_, found := labelColors[name]
+		if !found {
+			fmt.Printf("Ignoring: found unknown label %s\n", name)
+			// err := client.deleteLabel(name)
+			// if err != nil {
+			// log.Fatal(err)
+			// break
+			// }
+		}
+	}
 }
