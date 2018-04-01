@@ -23,7 +23,7 @@ import (
 	"os"
 
 	"github.com/google/go-github/github"
-	"github.com/stephen-soltesz/github-label-sync/issues"
+	"golang.org/x/oauth2"
 )
 
 var (
@@ -74,6 +74,31 @@ func init() {
 	}
 }
 
+// A Client manages communication with the Github API.
+type Client struct {
+	// githubClient is an authenticated client for accessing the github API.
+	GithubClient *github.Client
+	// owner is the github project (e.g. github.com/<owner>/<repo>).
+	owner string
+	// repo is the github repository under the above owner.
+	repo string
+}
+
+// NewClient creates an Client authenticated using the Github authToken.
+// Future operations are only performed on the given github "owner/repo".
+func NewClient(owner, repo, authToken string) *Client {
+	ctx := context.Background()
+	tokenSource := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: authToken},
+	)
+	client := &Client{
+		GithubClient: github.NewClient(oauth2.NewClient(ctx, tokenSource)),
+		owner:        owner,
+		repo:         repo,
+	}
+	return client
+}
+
 func pString(s string) *string {
 	return &s
 }
@@ -85,7 +110,7 @@ func newLabel(name, color string) *github.Label {
 	}
 }
 
-type localClient issues.Client
+type localClient Client
 
 func (l localClient) syncLabel(current map[string]string, name, color string) error {
 	colorBefore, found := current[name]
@@ -134,7 +159,7 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-	client := (*localClient)(issues.NewClient(fGithubOwner, fGithubRepo, fAuthtoken))
+	client := (*localClient)(NewClient(fGithubOwner, fGithubRepo, fAuthtoken))
 	foundLabels, resp, err := client.GithubClient.Issues.ListLabels(
 		context.Background(), fGithubOwner, fGithubRepo, nil)
 	if err != nil {
